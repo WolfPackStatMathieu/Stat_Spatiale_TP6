@@ -1,0 +1,145 @@
+---
+title: "TP6 Introduction à la statistique spatiale"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, results='hide',error=TRUE,eval = FALSE)
+```
+
+------------------------------------------------------------------------
+
+## **OBJECTIFS DU TP:**
+
+-   Le but de ce TP est de s'iniitier à l'étude de l'autocorrélation spatiale sur données surfaciques.
+
+Aﬁn d'utiliser une version de R plus récente (et une version du package sf plus récente aussi), vous travaillerez de préférence soit :
+
+-   sur votre ordinateur personnel
+-   sur le datalab (plateforme du sspcloud, service de l'Insee) : <https://datalab.sspcloud.fr>.
+
+Les fonds et données nécessaires au TP sont disponibles sous "U:/Eleves/Cartographie/TP6.zip".
+
+------------------------------------------------------------------------
+
+Commencer par créer un projet pour cette séance de TP. Vous placerez votre projet dans un répertoire personnel. Ouvrir un nouveau programme R. Vous aurez besoin des packages suivants pour le TP :
+
+```{r}
+# Chargement des packages
+library(dplyr)
+library(sf)
+library(spdep)
+library(leaflet)
+library(RColorBrewer)
+
+```
+
+### Exercice 2
+
+Nous allons étudier s'il existe un phénomène d'autocorrélation spatiale des revenus médians par iris marseillais.
+
+Vous utiliserez le fond des communes des Iris France entiere ainsi que les données
+
+1.  Commencez par vous créer votre jeu de données : Sélectionnez la ville de Marseille sur votre fond d'Iris et faire la jointure avec votre jeu de données.
+
+```{r}
+# Import des données
+iris<-st_read("fonds/iris_franceentiere_2021/iris_franceentiere_2021.shp",
+              options="ENCODING=WINDOWS-1252")
+data<-read.csv2("data/BASE_TD_FILO_DISP_IRIS_2018.csv")
+
+# Jointure
+marseille<-iris %>% 
+  filter(substr(depcom,1,3)=="132") %>% 
+  left_join(
+    data %>% select(code=IRIS,DISP_MED18),
+    by="code"
+  )
+```
+
+```{r}
+str(marseille)
+plot(marseille %>% st_geometry())
+```
+
+
+```{r}
+library(mapview)
+
+mapview(
+  marseille, 
+  alpha.regions = 0.35,
+  label = "code"
+)
+```
+
+
+
+```{r}
+library(mapview)
+
+mapview(
+  marseille, 
+  # z = c("DISP_MED18"),
+  alpha.regions = 0.35,
+  layer.name = "Revenu_median",
+  label = "code"
+)
+
+```
+
+
+2.  Le système de projection de votre table est en WGS84, convertissez-le en Lambert-93 (EPSG 2154)
+
+```{r}
+marseille<-marseille %>% 
+  st_transform(2154)
+```
+
+3.  Faites un premier résumé statistique de la variable de revenu médian. Faites également un boxplot du revenu moyen en fonction des arrondissements.
+
+```{r}
+summary(marseille$DISP_MED18)
+boxplot(marseille$DISP_MED18)
+hist(marseille$DISP_MED18, breaks = seq(10,40,1)*1e3)
+library(ggplot2)
+boxplot(marseille$DISP_MED18~marseille$depcom)
+ggplot(marseille) +
+  geom_boxplot(aes(x=DISP_MED18, y=depcom)) +
+  geom_vline(xintercept = mean(marseille$DISP_MED18), linetype = "dashed", size = 1, col = "darkred", alpha= 0.5) +
+  labs(y="arrondissements")+
+  theme_minimal()
+
+ggplot(marseille) +
+  geom_histogram(aes(x=DISP_MED18, fill=depcom), bins = 5) +
+  facet_wrap(~depcom, scales = "free") +
+  guides(fill = "none") +
+  scale_fill_viridis_d() +
+  theme_minimal()
+
+# Pour aller plus loin, une analyse de la variance montre que la différence des 
+# moyennes des revenus disponibles médians par arrondissement est significative
+# (pvaleur du test de fisher ~ 0)
+summary(aov(DISP_MED18 ~ depcom, data = marseille))
+#Attention la normalité de la variable de revenu n'est pas assurée => résultats à prendre avec qqs pincettes.
+```
+
+4.  Supprimer les valeurs manquantes puis représenter la carte de Marseille en fonction des revenus. Vous pouvez utiliser la fonction plot (n'hésitez pas à utiliser une ou plusieurs méthodes de discrétisation automatique - argument `breaks`). Au vu de la carte, vous semble-t-il y avoir un phénomène spatial dans la distribution des revenus ?
+
+```{r}
+marseille<-marseille %>% 
+  filter(!is.na(DISP_MED18))
+  # tidyr::drop_na() # autre façon de retirer les valeurs manquantes
+
+plot(marseille["DISP_MED18"]) # analyse continue
+
+mapview(
+  marseille, 
+  z = c("DISP_MED18"),
+  alpha.regions = 0.35,
+  layer.name = "Revenu_median",
+  label = "code"
+)
+
+plot(marseille["DISP_MED18"], breaks = "quantile", nbreaks = 10) # analyse avec discrétisation automatique
+plot(marseille["DISP_MED18"], breaks = "jenks") # analyse avec discrétisation automatique
